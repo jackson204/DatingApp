@@ -78,6 +78,20 @@ ng serve
 - Angular CLI
 - Visual Studio Code (推薦)
 
+## 📚 文件
+
+- [故障排除指南](TROUBLESHOOTING.md) - 常見問題與解決方案
+- [前端開發必要擴充套件](#前端開發必要擴充套件) - VS Code 擴充套件推薦
+
+## 🆘 遇到問題？
+
+開發過程中遇到問題，請先查看 [故障排除指南](TROUBLESHOOTING.md)。
+
+常見問題快速連結：
+- [ERR_CONNECTION_REFUSED 錯誤](TROUBLESHOOTING.md#問題err_connection_refused---後端伺服器未執行)
+- [CORS 設定說明](TROUBLESHOOTING.md#cors-設定說明)
+- [資料庫連線問題](TROUBLESHOOTING.md#資料庫問題)
+
 ---
 
 最後更新：2025年10月25日
