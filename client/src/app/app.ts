@@ -1,4 +1,5 @@
-import { Component } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Component, inject, OnInit } from '@angular/core';
 
 @Component({
   selector: 'app-root',
@@ -6,6 +7,15 @@ import { Component } from '@angular/core';
   templateUrl: './app.html',
   styleUrl: './app.css'
 })
-export class App {
-  protected  title = 'client';
+export class App implements OnInit {
+  private http = inject(HttpClient);
+  protected  title = 'Dating App';
+
+  ngOnInit(): void {
+    this.http.get('https://localhost:5001/api/members').subscribe({
+      next: response => console.log(response),
+      error: err => console.error(err),
+      complete: () => console.log('Request complete')
+    });
+  }
 }
