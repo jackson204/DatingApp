@@ -90,8 +90,32 @@ ng serve
 常見問題快速連結：
 - [ERR_CONNECTION_REFUSED 錯誤](TROUBLESHOOTING.md#問題err_connection_refused---後端伺服器未執行)
 - [CORS 設定說明](TROUBLESHOOTING.md#cors-設定說明)
+- [Zoneless Change Detection 資料無法顯示](TROUBLESHOOTING.md#問題zoneless-模式下資料無法顯示)
 - [資料庫連線問題](TROUBLESHOOTING.md#資料庫問題)
+
+## 重要技術說明
+
+### Angular Zoneless Change Detection
+
+本專案採用 Angular 20 的 **Zoneless Change Detection** 模式，這是 Angular 新一代的變更偵測機制。
+
+**關鍵特性**：
+- ✅ 更高的執行效能（精確更新 DOM）
+- ✅ 更小的 bundle 大小（不需要 Zone.js）
+- ⚠️ 需要使用 Signal 管理狀態
+- ⚠️ 不會自動觸發變更偵測
+
+**開發注意事項**：
+- 所有動態資料必須使用 `signal()` 宣告
+- HTTP 請求回應需用 `.set()` 更新 Signal
+- 或使用 `toSignal()` 將 Observable 轉換為 Signal
+
+詳細說明請參考 [Zoneless 模式疑難排解](TROUBLESHOOTING.md#問題zoneless-模式下資料無法顯示)。
 
 ---
 
-最後更新：2025年10月25日
+## 📅 更新日誌
+
+- **2025年10月26日**: 新增 [Zoneless Change Detection 問題分析與解決方案](TROUBLESHOOTING.md#問題zoneless-模式下資料無法顯示)
+- **2025年10月25日**: 新增 [CORS 設定](TROUBLESHOOTING.md#cors-設定說明)與[連線問題排除指南](TROUBLESHOOTING.md#問題err_connection_refused---後端伺服器未執行)
+- **2025年10月25日**: 專案初始化與基礎架構建立

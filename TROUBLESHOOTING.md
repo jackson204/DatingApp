@@ -4,6 +4,8 @@
 
 ## 📋 快速導航
 
+- [Angular 變更偵測問題](#angular-變更偵測問題)
+  - [Zoneless 模式下資料無法顯示](#問題zoneless-模式下資料無法顯示)
 - [CORS 相關問題](#cors-相關問題)
   - [ERR_CONNECTION_REFUSED - 後端伺服器未執行](#問題err_connection_refused---後端伺服器未執行)
   - [CORS 設定說明](#cors-設定說明)
@@ -11,6 +13,170 @@
 - [前端建構問題](#前端建構問題)
 - [CORS 知識補充](#cors-知識補充)
 - [參考資源](#參考資源)
+
+---
+
+## Angular 變更偵測問題
+
+### 問題：Zoneless 模式下資料無法顯示
+
+**發生日期**: 2025年10月26日
+
+**問題描述**:
+
+在使用 Angular 20 的 Zoneless Change Detection 模式時，HTTP 請求成功取得資料，但資料無法顯示在瀏覽器上。即使重新整理頁面，資料仍然無法顯示。
+
+**症狀**:
+- ✅ Network 標籤顯示 API 請求成功（200 OK）
+- ✅ Console 沒有顯示任何錯誤
+- ❌ 畫面上沒有顯示資料
+- ❌ 重新整理後資料仍然不顯示
+
+**錯誤範例程式碼**:
+
+```typescript
+// ❌ 在 Zoneless 模式下無法正常運作
+export class App implements OnInit {
+  protected members: any;  // 普通屬性
+
+  ngOnInit(): void {
+    this.http.get('https://localhost:5001/api/members').subscribe({
+      next: response => {
+        this.members = response;  // ❌ 直接賦值不會觸發 UI 更新
+      }
+    });
+  }
+}
+```
+
+**根本原因分析**:
+
+本專案在 `app.config.ts` 中啟用了 `provideZonelessChangeDetection()`：
+
+```typescript
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideZonelessChangeDetection(),  // ⚠️ 關鍵設定
+    // ...
+  ]
+};
+```
+
+**Zoneless 模式的特性**:
+
+| 特性 | Zone.js（傳統） | Zoneless（本專案） |
+|------|----------------|-------------------|
+| 自動偵測 | ✅ 任何非同步操作後自動觸發 | ❌ 不會自動觸發 |
+| HTTP 請求 | ✅ 請求完成後自動更新畫面 | ❌ 需要手動通知或使用 Signal |
+| 屬性賦值 | ✅ `this.x = value` 會觸發更新 | ❌ 不會觸發更新 |
+| 效能 | ⚠️ 較慢（檢查整個元件樹） | ✅ 更快（精確更新） |
+
+**為什麼傳統方式會失敗**:
+
+```
+HTTP 請求完成
+  ↓
+this.members = response
+  ↓
+⚠️ 沒有 Zone.js 監控
+  ↓
+❌ 沒有觸發變更偵測
+  ↓
+❌ 畫面保持不變
+```
+
+**解決方案**
+
+```typescript
+import { Component, inject, OnInit, signal } from '@angular/core';
+
+
+@Component({
+  selector: 'app-root',
+  imports: [],
+  templateUrl: './app.html',
+  styleUrl: './app.css'
+})
+export class App implements OnInit {
+  private http = inject(HttpClient);
+  
+  // ✅ 使用 Signal 管理狀態
+ protected members = signal<any>([]);
+
+  ngOnInit(): void {
+    this.http.get<Member[]>('https://localhost:5001/api/members').subscribe({
+      next: response => this.members.set(response),  // ✅ 使用 .set() 更新
+      error: err => console.error('載入會員資料失敗：', err),
+      complete: () => console.log('請求完成')
+    });
+  }
+}
+```
+
+**Template 使用方式**:
+
+```html
+<!-- ✅ 使用 () 讀取 Signal 值 -->
+@for (member of members(); track member.id) {
+  <li>{{ member.displayName }}</li>
+}
+```
+
+
+**Zoneless 模式的其他注意事項**:
+
+在 Zoneless 模式下，以下操作都**不會**自動觸發 UI 更新：
+
+```typescript
+// ❌ 這些都不會觸發變更偵測
+setTimeout(() => this.count++, 1000);
+element.addEventListener('click', () => this.flag = true);
+this.http.get(...).subscribe(data => this.data = data);
+
+// ✅ 必須使用 Signal
+setTimeout(() => this.count.update(c => c + 1), 1000);
+element.addEventListener('click', () => this.flag.set(true));
+this.http.get(...).subscribe(data => this.data.set(data));
+```
+
+
+
+**驗證步驟**:
+
+1. **確認使用 Signal**:
+   ```typescript
+   protected members = signal<any>([]);
+   ```
+
+2. **確認使用 .set() 更新**:
+   ```typescript
+   this.members.set(response);
+   ```
+
+3. **確認 Template 使用 () 讀取**:
+   ```html
+   @for (member of members(); track member.id) {
+     ...
+   }
+   ```
+
+4. **測試**:
+   - 啟動後端和前端
+   - 開啟瀏覽器 `http://localhost:4200`
+   - 應該會看到資料正確顯示
+   - 重新整理後資料仍然顯示
+
+**相關檔案**:
+- `client/src/app/app.config.ts` - Zoneless 模式設定
+- `client/src/app/app.ts` - 元件程式碼
+- `client/src/app/app.html` - Template
+
+**延伸閱讀**:
+- [Angular Signals 官方文件](https://angular.dev/guide/signals)
+- [Zoneless Change Detection RFC](https://github.com/angular/angular/discussions/49685)
+- [toSignal() API 參考](https://angular.dev/api/core/rxjs-interop/toSignal)
+
+**狀態**: ✅ 已解決
 
 ---
 
@@ -358,9 +524,15 @@ curl https://localhost:5001/api/members \
 
 ### 官方文件
 
+#### Angular
+- [Angular Signals](https://angular.dev/guide/signals) - Signal 反應式狀態管理
+- [Zoneless Change Detection](https://github.com/angular/angular/discussions/49685) - Zoneless 模式討論
+- [toSignal() API](https://angular.dev/api/core/rxjs-interop/toSignal) - Observable 轉 Signal
+- [Angular HttpClient](https://angular.dev/guide/http) - HTTP 客戶端指南
+
+#### .NET & CORS
 - [MDN - CORS 跨來源資源共用](https://developer.mozilla.org/zh-TW/docs/Web/HTTP/CORS)
 - [ASP.NET Core - 啟用 CORS](https://learn.microsoft.com/zh-tw/aspnet/core/security/cors)
-- [Angular - HttpClient](https://angular.dev/guide/http)
 
 ### 相關工具
 
@@ -377,6 +549,38 @@ curl https://localhost:5001/api/members \
 
 ---
 
-**文件版本**: 1.0.0  
-**最後更新**: 2025年10月25日  
+## 📊 問題統計
+
+| 問題類型 | 解決數量 | 狀態 |
+|---------|---------|------|
+| Angular 變更偵測 | 1 | ✅ 已解決 |
+| CORS 相關 | 2 | ✅ 已解決 |
+| 資料庫問題 | 1 | ✅ 已記錄 |
+| 前端建構 | 1 | ✅ 已記錄 |
+
+---
+
+## 📅 問題解決日誌
+
+### 2025年10月26日
+- ✅ **[Angular 變更偵測]** 解決 Zoneless 模式下資料無法顯示的問題
+  - 根本原因：使用 `provideZonelessChangeDetection()` 後，傳統屬性賦值不會觸發 UI 更新
+  - 解決方案：改用 Signal 或 toSignal() 管理狀態
+  - 影響範圍：所有使用 HTTP 請求的元件
+  - 參考：[詳細說明](#問題zoneless-模式下資料無法顯示)
+
+### 2025年10月25日
+- ✅ **[CORS]** 設定跨來源資源共用政策
+  - 問題：前端無法訪問後端 API
+  - 解決：在 `Program.cs` 中加入 CORS 中介軟體
+  - 參考：[CORS 設定說明](#cors-設定說明)
+
+- ✅ **[連線]** 解決 ERR_CONNECTION_REFUSED 錯誤
+  - 問題：後端伺服器未啟動
+  - 解決：啟動 API 專案並信任開發憑證
+  - 參考：[連線問題排除](#問題err_connection_refused---後端伺服器未執行)
+
+---
+
+**文件版本**: 1.1.0  
 **維護者**: DatingApp 開發團隊
