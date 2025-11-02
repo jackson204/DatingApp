@@ -88,6 +88,7 @@ ng serve
 開發過程中遇到問題，請先查看 [故障排除指南](TROUBLESHOOTING.md)。
 
 常見問題快速連結：
+- [[ApiController] 參數綁定問題](TROUBLESHOOTING.md#問題apicontroller-導致參數必須從-query-string-綁定)
 - [ERR_CONNECTION_REFUSED 錯誤](TROUBLESHOOTING.md#問題err_connection_refused---後端伺服器未執行)
 - [CORS 設定說明](TROUBLESHOOTING.md#cors-設定說明)
 - [Zoneless Change Detection 資料無法顯示](TROUBLESHOOTING.md#問題zoneless-模式下資料無法顯示)
@@ -116,6 +117,7 @@ ng serve
 
 ## 📅 更新日誌
 
+- **2025年11月2日**: 新增 [[ApiController] 參數綁定問題分析與解決方案](TROUBLESHOOTING.md#問題apicontroller-導致參數必須從-query-string-綁定)
 - **2025年10月26日**: 新增 [Zoneless Change Detection 問題分析與解決方案](TROUBLESHOOTING.md#問題zoneless-模式下資料無法顯示)
 - **2025年10月25日**: 新增 [CORS 設定](TROUBLESHOOTING.md#cors-設定說明)與[連線問題排除指南](TROUBLESHOOTING.md#問題err_connection_refused---後端伺服器未執行)
 - **2025年10月25日**: 專案初始化與基礎架構建立

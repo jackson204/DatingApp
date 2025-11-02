@@ -4,6 +4,8 @@
 
 ## 📋 快速導航
 
+- [ASP.NET Core Web API 問題](#aspnet-core-web-api-問題)
+  - [[ApiController] 導致參數必須從 Query String 綁定](#問題apicontroller-導致參數必須從-query-string-綁定)
 - [Angular 變更偵測問題](#angular-變更偵測問題)
   - [Zoneless 模式下資料無法顯示](#問題zoneless-模式下資料無法顯示)
 - [CORS 相關問題](#cors-相關問題)
@@ -15,6 +17,172 @@
 - [參考資源](#參考資源)
 
 ---
+
+## ASP.NET Core Web API 問題
+
+### 問題：[ApiController] 導致參數必須從 Query String 綁定
+
+**發生日期**: 2025年11月2日  
+**問題類型**: 🏷️ ASP.NET Core 參數綁定
+
+---
+
+#### 📋 問題摘要
+
+在使用 `[ApiController]` 特性的控制器中，POST 請求無法從 Request Body 接收 JSON 資料，必須使用 Query String 才能正確傳遞參數。
+
+**典型症狀**:
+- ✅ 使用 Query String 可以成功呼叫：`/api/Account/register?email=test@test.com&displayName=test&password=Pass123`
+- ❌ 使用 JSON Body 會回傳 400 Bad Request：
+  ```json
+  {
+    "email": "test@test.com",
+    "displayName": "test",
+    "password": "Pass123"
+  }
+  ```
+- ❌ 瀏覽器開發者工具顯示 `400 Bad Request`
+- ❌ 參數無法正確綁定到 Controller Action
+
+---
+
+#### 🔍 根本原因與原理
+
+> 💡 **關鍵概念**: `[ApiController]` 特性會改變 ASP.NET Core 的參數綁定行為，簡單類型預設從 Query String 綁定，複雜類型才從 Request Body 綁定。
+
+##### 本專案的問題程式碼
+
+**問題發生在**: `API/Controllers/AccountController.cs`
+
+```csharp
+[ApiController]
+[Route("api/[controller]")]
+public class AccountController(AppDbContext context) : BaseController
+{
+    [HttpPost("register")]
+    public async Task<ActionResult<AppUser>> Register(
+        string email,        // ❌ 簡單類型
+        string displayName,  // ❌ 簡單類型
+        string password)     // ❌ 簡單類型
+    {
+        // ... 實作程式碼
+    }
+}
+```
+
+##### [ApiController] 的參數綁定規則
+
+| 參數類型 | 預設綁定來源 | 說明 |
+|---------|------------|------|
+| 簡單類型 (`string`, `int`, `bool` 等) | **Query String** | `[FromQuery]` |
+| 複雜類型 (自訂類別、物件) | **Request Body** | `[FromBody]` |
+| IFormFile | Form Data | `[FromForm]` |
+| Route 參數 | URL 路徑 | `[FromRoute]` |
+
+##### 為什麼會出現 400 錯誤？
+
+```
+【錯誤流程】
+前端發送 POST 請求
+  ↓
+Content-Type: application/json
+Body: { "email": "test@test.com", ... }
+  ↓
+到達 ASP.NET Core
+  ↓
+[ApiController] 啟用參數綁定推斷
+  ↓
+檢測到參數類型為 string（簡單類型）
+  ↓
+⚠️ 嘗試從 Query String 綁定參數
+  ↓
+❌ Query String 中沒有 email、displayName、password
+  ↓
+❌ 參數綁定失敗，值為 null
+  ↓
+❌ 模型驗證失敗（required 參數為 null）
+  ↓
+❌ 自動回傳 400 Bad Request
+```
+
+##### 參數綁定比較表
+
+**原始錯誤寫法**:
+```csharp
+// ❌ 三個 string 參數會從 Query String 綁定
+[HttpPost("register")]
+public async Task<ActionResult<AppUser>> Register(
+    string email, 
+    string displayName, 
+    string password)
+{
+    // ...
+}
+```
+
+**正確寫法（使用 DTO）**:
+```csharp
+// ✅ RegisterDto 是複雜類型，會從 Request Body 綁定
+[HttpPost("register")]
+public async Task<ActionResult<AppUser>> Register(RegisterDto registerDto)
+{
+    // ...
+}
+```
+
+---
+
+#### 🛠️ 解決方案
+
+##### 方案 1: 使用 DTO 類別（推薦，已實施）
+
+**步驟 1: 建立 DTO 類別**
+
+檔案位置：`API/DTOs/RegisterDto.cs`
+
+```csharp
+namespace API.DTOs;
+
+/// <summary>
+/// 註冊用戶的資料傳輸物件
+/// </summary>
+public class RegisterDto
+{
+    public required string Email { get; set; }
+    
+    public required string DisplayName { get; set; }
+    
+    public required string Password { get; set; }
+}
+```
+
+📝 **說明**: 
+- 使用 `required` 關鍵字確保屬性必須提供值
+- 類別屬於複雜類型，`[ApiController]` 會自動從 Request Body 綁定
+- 符合 REST API 最佳實踐
+
+
+**步驟 2: 測試 API**
+
+使用 Postman 
+
+```http
+POST https://localhost:5001/api/Account/register
+Content-Type: application/json
+
+{
+  "email": "test@test.com",
+  "displayName": "test",
+  "password": "Pass123"
+}
+```
+
+**預期回應**: `200 OK` 並回傳建立的用戶物件
+
+
+
+#### 📚 延伸閱讀
+
 
 ## Angular 變更偵測問題
 
@@ -1555,6 +1723,7 @@ else
 
 | 問題類型 | 解決數量 | 狀態 |
 |---------|---------|------|
+| ASP.NET Core Web API | 1 | ✅ 已解決 |
 | Angular 變更偵測 | 1 | ✅ 已解決 |
 | CORS 相關 | 2 | ✅ 已解決 |
 | 資料庫問題 | 1 | ✅ 已記錄 |
@@ -1563,6 +1732,13 @@ else
 ---
 
 ## 📅 問題解決日誌
+
+### 2025年11月2日
+- ✅ **[ASP.NET Core Web API]** 解決 [ApiController] 參數綁定問題
+  - 根本原因：`[ApiController]` 特性導致簡單類型參數從 Query String 綁定而非 Request Body
+  - 解決方案：使用 DTO 類別（複雜類型）作為參數，自動從 Request Body 綁定
+  - 影響範圍：所有需要接收 JSON Body 的 API 端點
+  - 參考：[詳細說明](#問題apicontroller-導致參數必須從-query-string-綁定)
 
 ### 2025年10月26日
 - ✅ **[Angular 變更偵測]** 解決 Zoneless 模式下資料無法顯示的問題
