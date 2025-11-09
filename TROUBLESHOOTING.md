@@ -394,25 +394,6 @@ Content-Type: application/json
 
 📝 **說明**: `[ApiController]` 屬性會自動處理 Model Validation，驗證失敗時自動回傳 400。
 
-##### 驗證屬性說明表
-
-| 驗證屬性 | 用途 | 範例 |
-|---------|------|------|
-| `[Required]` | 欄位不能為空 | `[Required]` |
-| `[StringLength]` | 限制字串長度 | `[StringLength(50, MinimumLength = 3)]` |
-| `[EmailAddress]` | 驗證電子郵件格式 | `[EmailAddress]` |
-| `[Range]` | 數值範圍驗證 | `[Range(18, 120)]` |
-| `[RegularExpression]` | 正則表達式驗證 | `[RegularExpression(@"^[a-zA-Z]+$")]` |
-| `[Compare]` | 比較兩個屬性值 | `[Compare("Password")]` |
-| `[Url]` | 驗證 URL 格式 | `[Url]` |
-| `[Phone]` | 驗證電話號碼格式 | `[Phone]` |
-
-
-
-
-
-
-
 
 
 #### ✅ 驗證步驟
