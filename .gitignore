@@ -484,3 +484,4 @@ $RECYCLE.BIN/
 *.swp
 API/dating.db*
 API/appsettings.json
+.copilot-commit-message-instructions.md
