@@ -7,6 +7,9 @@
 - [ASP.NET Core Web API 問題](#aspnet-core-web-api-問題)
   - [[ApiController] 導致參數必須從 Query String 綁定](#問題apicontroller-導致參數必須從-query-string-綁定)
   - [required 關鍵字無法驗證空字串](#問題required-關鍵字無法驗證空字串)
+- [JWT 認證實作完整指南](#jwt-認證實作完整指南)
+  - [JWT 基礎原理與概念](#jwt-基礎原理與概念)
+  - [實作 JWT Token 服務](#實作-jwt-token-服務)
 - [Angular 變更偵測問題](#angular-變更偵測問題)
   - [Zoneless 模式下資料無法顯示](#問題zoneless-模式下資料無法顯示)
 - [CORS 相關問題](#cors-相關問題)
@@ -486,6 +489,858 @@ public required string Email { get; set; } = string.Empty;
 
 **解決狀態**: ✅ 已解決  
 **相關問題**: [[ApiController] 導致參數必須從 Query String 綁定](#問題apicontroller-導致參數必須從-query-string-綁定)
+
+---
+
+## JWT 認證實作完整指南
+
+### JWT 基礎原理與概念
+
+**建立日期**: 2025年11月11日  
+**文件類型**: 📚 知識庫 + 實作指南  
+**難度等級**: ⭐⭐⭐ 中級
+
+---
+
+#### 📋 概念摘要
+
+JWT (JSON Web Token) 是一種開放標準 (RFC 7519),用於在各方之間安全地傳輸資訊。在現代 Web 應用程式中,JWT 是最常用的無狀態 (stateless) 認證機制。
+
+**核心要點**:
+- 🔐 無狀態認證 - 伺服器不需要儲存 session
+- 📦 自包含 (Self-contained) - Token 本身包含所有必要資訊
+- 🔒 數位簽章 - 防止 token 被竄改
+- ⚡ 高效能 - 減少資料庫查詢次數
+
+---
+
+#### 🔍 JWT 的結構與原理
+
+> 💡 **關鍵概念**: JWT 由三個部分組成,用 `.` 分隔,每個部分都是 Base64 編碼的 JSON。
+
+##### JWT 的三個組成部分
+
+一個完整的 JWT 長這樣:
+
+```
+eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJuYW1laWQiOiIxIiwiZW1haWwiOiJ0ZXN0QHRlc3QuY29tIiwibmJmIjoxNzMxMzE2ODAwLCJleHAiOjE3MzE5MjE2MDAsImlhdCI6MTczMTMxNjgwMH0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c
+
+分解為:
+[Header].[Payload].[Signature]
+```
+
+##### 結構詳解表
+
+| 部分 | Base64 編碼前 | 說明 | 可被解碼? |
+|------|-------------|------|----------|
+| **Header** | `{"alg":"HS512","typ":"JWT"}` | 演算法類型和 token 類型 | ✅ 是 |
+| **Payload** | `{"nameid":"1","email":"test@test.com",...}` | 使用者資訊 (Claims) | ✅ 是 |
+| **Signature** | `HMAC-SHA512(header + payload, secret)` | 數位簽章 | ❌ 否 (單向雜湊) |
+
+**重要觀念**:
+- ⚠️ **Payload 不是加密的!** 任何人都能解碼看到內容
+- 🔒 **Signature 確保完整性** - 防止 token 被竄改
+- 🔐 **只有伺服器知道 Secret Key** - 只有伺服器能產生有效簽章
+
+##### 視覺化結構
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                         JWT Token                            │
+├─────────────────┬─────────────────────┬─────────────────────┤
+│     Header      │       Payload       │      Signature      │
+│                 │                     │                     │
+│ {               │ {                   │ HMAC-SHA512(        │
+│   "alg":"HS512",│   "nameid": "1",    │   base64(header) +  │
+│   "typ":"JWT"   │   "email": "...",   │   "." +             │
+│ }               │   "exp": 1731921600 │   base64(payload),  │
+│                 │ }                   │   secret_key        │
+│                 │                     │ )                   │
+├─────────────────┼─────────────────────┼─────────────────────┤
+│   Base64 編碼   │    Base64 編碼      │    Base64 編碼      │
+│   ↓             │    ↓                │    ↓                │
+│ eyJhbGci...     │ eyJuYW1l...         │ SflKxwRJ...         │
+└─────────────────┴─────────────────────┴─────────────────────┘
+                            ↓
+            用 "." 連接成完整的 JWT Token
+```
+
+---
+
+#### 🔄 JWT 認證流程完整解析
+
+##### 完整的使用者認證流程
+
+```
+┌──────────┐                                    ┌──────────┐
+│ 客戶端   │                                    │ 伺服器   │
+│ (瀏覽器) │                                    │ (API)    │
+└──────────┘                                    └──────────┘
+     │                                               │
+     │  1️⃣  POST /api/account/register              │
+     │      { email, password, displayName }        │
+     ├──────────────────────────────────────────────>│
+     │                                               │
+     │                         2️⃣  驗證資料          │
+     │                             雜湊密碼          │
+     │                             儲存到資料庫      │
+     │                                               │
+     │                         3️⃣  建立 JWT Token   │
+     │                             - 建立 Claims    │
+     │                             - 用 Secret 簽章 │
+     │                                               │
+     │  4️⃣  200 OK                                  │
+     │      { email, displayName, token: "eyJ..." } │
+     │<──────────────────────────────────────────────┤
+     │                                               │
+     │  5️⃣  儲存 token 到 localStorage              │
+     │                                               │
+     ├─────────────────────────────────────┐         │
+     │  const token = response.token;      │         │
+     │  localStorage.setItem('token', ...);│         │
+     └─────────────────────────────────────┘         │
+     │                                               │
+     │  6️⃣  後續請求帶上 token                      │
+     │      GET /api/members                         │
+     │      Authorization: Bearer eyJ...             │
+     ├──────────────────────────────────────────────>│
+     │                                               │
+     │                         7️⃣  驗證 token        │
+     │                             - 檢查簽章        │
+     │                             - 檢查過期時間    │
+     │                             - 解析 Claims     │
+     │                                               │
+     │  8️⃣  200 OK                                  │
+     │      [會員資料...]                            │
+     │<──────────────────────────────────────────────┤
+     │                                               │
+```
+
+##### 流程步驟詳解
+
+| 步驟 | 動作 | 誰執行 | 關鍵技術 |
+|------|------|--------|---------|
+| 1️⃣ | 發送註冊/登入請求 | 客戶端 | HTTP POST |
+| 2️⃣ | 驗證並儲存使用者 | 伺服器 | HMACSHA512 雜湊密碼 |
+| 3️⃣ | 產生 JWT Token | 伺服器 | `TokenService.CreateToken()` |
+| 4️⃣ | 回傳 token 給客戶端 | 伺服器 | JSON Response |
+| 5️⃣ | 儲存 token | 客戶端 | localStorage / cookie |
+| 6️⃣ | 請求時帶上 token | 客戶端 | Authorization Header |
+| 7️⃣ | 驗證 token | 伺服器 | JWT Middleware |
+| 8️⃣ | 回傳受保護的資料 | 伺服器 | HTTP Response |
+
+---
+
+#### 🎯 為什麼需要 JWT?比較傳統 Session
+
+##### Session-based vs Token-based 認證
+
+| 特性 | Session-based | JWT (Token-based) |
+|------|--------------|------------------|
+| **儲存位置** | 伺服器端 (記憶體/資料庫) | 客戶端 (localStorage/cookie) |
+| **狀態性** | Stateful (有狀態) | Stateless (無狀態) |
+| **擴充性** | ⚠️ 困難 (需要 session 同步) | ✅ 容易 (可水平擴展) |
+| **伺服器負擔** | ⚠️ 需要儲存和查詢 session | ✅ 不需要儲存 |
+| **撤銷能力** | ✅ 容易 (刪除 session) | ⚠️ 困難 (需額外機制) |
+| **跨網域** | ⚠️ 複雜 (CORS + Cookie) | ✅ 簡單 (Header 傳送) |
+| **行動應用** | ⚠️ 不適合 | ✅ 適合 |
+
+##### JWT 的優勢
+
+**1. 無狀態 (Stateless)**
+```
+傳統 Session:
+客戶端請求 → 伺服器查詢 Session Store → 驗證身份
+                  ↑
+            每次都要查詢 (效能瓶頸)
+
+JWT:
+客戶端請求 (帶 token) → 伺服器驗證簽章 → 解析 token → 完成
+                            ↑
+                      不需要查詢資料庫 (更快!)
+```
+
+**2. 可擴展性 (Scalability)**
+```
+傳統 Session (多台伺服器):
+Server A 產生 session → 需要同步到 Server B, C, D
+                        (複雜的 session 共享機制)
+
+JWT (多台伺服器):
+任何伺服器都能驗證 token (只要有相同的 Secret Key)
+                        (無需同步!)
+```
+
+**3. 跨平台支援**
+```
+JWT 可用於:
+✅ Web 應用程式 (在 Header 中傳送)
+✅ 行動應用程式 (iOS, Android)
+✅ 桌面應用程式
+✅ 微服務架構 (服務間認證)
+```
+
+---
+
+#### ⚠️ JWT 的安全考量
+
+> 💡 **關鍵概念**: JWT 不是萬能的,需要正確使用才能確保安全。
+
+##### 重要的安全原則
+
+| 原則 | 說明 | 為什麼重要 |
+|------|------|-----------|
+| **不要存放敏感資訊** | Payload 可被解碼 | 任何人都能看到內容 |
+| **使用強密碼作為 Secret Key** | 至少 64 字元 | 防止暴力破解 |
+| **設定合理的過期時間** | 建議 7-30 天 | 限制 token 被盜用的風險 |
+| **使用 HTTPS** | 加密傳輸 | 防止 token 被攔截 |
+| **驗證簽章** | 每次請求都驗證 | 確保 token 未被竄改 |
+
+##### 常見的錯誤做法
+
+```csharp
+// ❌ 錯誤 1: 在 Payload 中存放密碼
+var claims = new List<Claim>
+{
+    new(ClaimTypes.NameIdentifier, user.Id),
+    new("password", user.Password)  // ❌ 絕對不要這樣做!
+};
+
+// ❌ 錯誤 2: 使用過短的 Secret Key
+var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("secret"));
+// "secret" 只有 6 個字元,太短了!
+
+// ❌ 錯誤 3: Token 永不過期
+var tokenDescriptor = new SecurityTokenDescriptor
+{
+    Expires = null  // ❌ 沒有設定過期時間!
+};
+
+// ❌ 錯誤 4: 將 Secret Key 寫死在程式碼中
+var secretKey = "my-super-secret-key-12345";  // ❌ 提交到版控會洩漏!
+```
+
+##### 正確的安全做法
+
+```csharp
+// ✅ 正確 1: 只存放必要的識別資訊
+var claims = new List<Claim>
+{
+    new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+    new(ClaimTypes.Email, user.Email)
+    // 不包含密碼、信用卡等敏感資訊
+};
+
+// ✅ 正確 2: 使用足夠長的 Secret Key (64+ 字元)
+var tokenKey = config["TokenKey"];  // 從設定檔讀取
+if (tokenKey.Length < 64)
+{
+    throw new Exception("Token key must be at least 64 characters");
+}
+
+// ✅ 正確 3: 設定合理的過期時間
+var tokenDescriptor = new SecurityTokenDescriptor
+{
+    Expires = DateTime.UtcNow.AddDays(7)  // 7 天後過期
+};
+
+// ✅ 正確 4: 從環境變數或設定檔讀取 Secret Key
+var secretKey = config["TokenKey"] ?? throw new Exception("Token key not found");
+```
+
+---
+
+### 實作 JWT Token 服務
+
+**實作日期**: 2025年11月11日  
+**問題類型**: 🏷️ JWT 認證實作
+
+---
+
+#### 📋 實作摘要
+
+本章節將逐步解析 `TokenService.CreateToken()` 方法的實作,從安裝套件到完整的 token 產生流程。
+
+**本章內容**:
+- 📦 安裝必要的 NuGet 套件
+- ⚙️ 設定 appsettings.json
+- 🔧 實作 TokenService
+- ✅ 整合到 Controller
+
+---
+
+#### 🛠️ 步驟 1: 安裝必要的 NuGet 套件
+
+##### 需要的套件
+
+| 套件名稱 | 用途 | 版本 |
+|---------|------|------|
+| `System.IdentityModel.Tokens.Jwt` | 產生和解析 JWT | 最新穩定版 |
+
+##### 安裝指令
+
+```bash
+# 在 API 專案目錄下執行
+cd API
+
+# 安裝 JWT 產生工具
+dotnet add package System.IdentityModel.Tokens.Jwt
+```
+
+
+📝 **說明**: 
+- `System.IdentityModel.Tokens.Jwt` 提供 `JwtSecurityTokenHandler` 類別用於產生 token
+
+##### 驗證安裝
+
+檢查 `API.csproj` 檔案:
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="X.X.X" />
+    <!-- 其他套件... -->
+  </ItemGroup>
+</Project>
+```
+
+---
+
+#### 🛠️ 步驟 2: 設定 appsettings.json
+
+##### 加入 TokenKey 設定
+
+編輯 `API/appsettings.json`:
+
+```json
+{
+  "TokenKey": "your-super-secret-key-must-be-at-least-64-characters-long-for-HS512",
+}
+```
+
+**TokenKey 要求**:
+- ✅ 至少 64 個字元 (用於 HMACSHA512)
+- ✅ 包含大小寫字母、數字、特殊符號
+- ✅ 隨機產生,不要使用字典單字
+- ⚠️ **絕對不要提交真實的 key 到版控!**
+
+##### 生產環境的 Secret Key 管理
+
+**開發環境** (`appsettings.Development.json`):
+```json
+{
+  "TokenKey": "dev-environment-secret-key-at-least-64-characters-long-12345678"
+}
+```
+
+
+---
+
+#### 🛠️ 步驟 3: 實作 TokenService.CreateToken() 方法
+
+
+##### 完整程式碼解析
+
+以下是本專案的 `TokenService.cs` 實作,我們將逐步解析每一個步驟:
+
+```csharp
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+using API.Entities;
+using API.Interfaces;
+using Microsoft.IdentityModel.Tokens;
+
+namespace API.Services;
+
+public class TokenService(IConfiguration config) : ITokenService
+{
+    public string CreateToken(AppUser user)
+    {
+        
+        // ====================================================
+        // 步驟 1️⃣: 建立 Claims (資料) - 我要說什麼?
+        // ====================================================
+        var claims = new List<Claim>()
+        {
+            new(ClaimTypes.Email, user.Email),
+            new(ClaimTypes.NameIdentifier, user.Id),
+        };
+        
+        // ====================================================
+        // 步驟 2️⃣: 取得 Secret Key (鑰匙) - 我用什麼來鎖?
+        // ====================================================
+        var tokenKey = config["TokenKey"] ?? throw new Exception("Token key not found in configuration");
+        
+        // 驗證 key 長度 (HMACSHA512 需要至少 64 字元)
+        if (tokenKey.Length < 64)
+        {
+            throw new Exception("Token key must be at least 64 characters long");
+        }
+        
+        var key = new SymmetricSecurityKey(
+            Encoding.UTF8.GetBytes(tokenKey)
+        );
+        
+        // ====================================================
+        // 步驟 3️⃣: 建立 Signing Credentials (簽名) - 我怎麼鎖?
+        // ====================================================
+        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha512Signature);
+
+        // ====================================================
+        // 步驟 4️⃣: 建立 Token Descriptor (範本) - 把一切組裝起來
+        // ====================================================
+        var tokenDescriptor = new SecurityTokenDescriptor
+        {
+            Subject = new ClaimsIdentity(claims),      // 內容 (Claims)
+            Expires = DateTime.Now.AddDays(7),         // 過期時間 (7天)
+            SigningCredentials = creds                 // 簽名方式
+        };
+
+        // ====================================================
+        // 步驟 5️⃣: 產生 Token (生成) - 最後生出 token!
+        // ====================================================
+        var tokenHandler = new JwtSecurityTokenHandler();
+        var token = tokenHandler.CreateToken(tokenDescriptor);  // 產生 token 物件
+        
+        return tokenHandler.WriteToken(token);  // 序列化成字串
+    }
+}
+```
+
+---
+
+#### 🔬 程式碼逐步解析
+
+##### 步驟 1️⃣: 建立 Claims (資料)
+
+**程式碼**:
+```csharp
+var claims = new List<Claim>()
+{
+    new(ClaimTypes.Email, user.Email),
+    new(ClaimTypes.NameIdentifier, user.Id),
+};
+```
+
+**解析**:
+
+| 元素 | 說明 | 範例值 |
+|------|------|--------|
+| `Claim` | 一條聲明/宣告 | "我的 Email 是 test@test.com" |
+| `ClaimTypes.Email` | 標準的 Claim 類型 | "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress" |
+| `ClaimTypes.NameIdentifier` | 使用者唯一識別碼 | "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier" |
+| `user.Email` | Claim 的值 | "test@test.com" |
+| `user.Id` | Claim 的值 | "1" |
+
+**為什麼要用 ClaimTypes 常數?**
+- ✅ 標準化 - ASP.NET Core 認得這些標準類型
+- ✅ IntelliSense 支援 - 不會打錯字
+- ✅ 自動對應 - `ClaimTypes.NameIdentifier` 會自動對應到 `User.Identity.Name`
+
+**產生的 JWT Payload (JSON)**:
+```json
+{
+  "email": "test@test.com",
+  "nameid": "1",
+  "nbf": 1731316800,
+  "exp": 1731921600,
+  "iat": 1731316800
+}
+```
+
+**常用的 ClaimTypes**:
+
+```csharp
+// 常見的 Claims
+new(ClaimTypes.NameIdentifier, user.Id.ToString()),  // 使用者 ID
+new(ClaimTypes.Email, user.Email),                   // Email
+new(ClaimTypes.Name, user.DisplayName),              // 顯示名稱
+new(ClaimTypes.Role, "Admin"),                       // 角色
+new(ClaimTypes.DateOfBirth, user.DateOfBirth),       // 生日
+new("CustomClaim", "CustomValue")                    // 自訂 Claim
+```
+
+**思考時間** 🤔:
+```
+Q: 為什麼不直接把整個 AppUser 物件放進 token?
+A: 
+1. Token 會很大 (影響效能)
+2. 敏感資料會洩漏 (PasswordHash, PasswordSalt)
+3. 只需要識別資訊,其他資料可以從資料庫查詢
+```
+
+---
+
+##### 步驟 2️⃣: 取得 Secret Key (鑰匙)
+
+**程式碼**:
+```csharp
+var tokenKey = config["TokenKey"] ?? throw new Exception("Token key not found in configuration");
+
+if (tokenKey.Length < 64)
+{
+    throw new Exception("Token key must be at least 64 characters long");
+}
+
+var key = new SymmetricSecurityKey(
+    Encoding.UTF8.GetBytes(tokenKey)
+);
+```
+
+**解析**:
+
+| 步驟 | 程式碼 | 說明 |
+|------|--------|------|
+| 1. 讀取設定 | `config["TokenKey"]` | 從 appsettings.json 讀取 |
+| 2. 驗證存在 | `?? throw new Exception(...)` | 如果為 null 則拋出例外 |
+| 3. 驗證長度 | `if (tokenKey.Length < 64)` | HMACSHA512 需要至少 64 字元 |
+| 4. 轉換為位元組 | `Encoding.UTF8.GetBytes(tokenKey)` | 將字串轉為 byte[] |
+| 5. 建立 Key 物件 | `new SymmetricSecurityKey(...)` | 包裝成安全金鑰物件 |
+
+**為什麼要檢查長度?**
+
+```
+HMACSHA512 演算法特性:
+- 輸出長度: 512 bits = 64 bytes
+- 建議 key 長度: 至少等於輸出長度 (64 bytes = 64 字元)
+- 太短的 key: 容易被暴力破解
+
+安全性比較:
+❌ 8 字元 key:  約 10^15 種組合 (幾天內可破解)
+✅ 64 字元 key: 約 10^120 種組合 (數兆年無法破解)
+```
+
+**SymmetricSecurityKey vs AsymmetricSecurityKey**:
+
+| 類型 | 使用場景 | 金鑰 | 範例演算法 |
+|------|---------|------|-----------|
+| **Symmetric** (對稱) | 單一伺服器或信任的系統 | 一把金鑰 (簽署 + 驗證) | HMACSHA256/512 |
+| **Asymmetric** (非對稱) | 多個系統或公開驗證 | 兩把金鑰 (私鑰簽署 / 公鑰驗證) | RSA, ECDSA |
+
+**本專案使用 Symmetric 的原因**:
+- ✅ 前後端屬於同一個應用程式
+- ✅ 效能更好 (對稱加密比非對稱快)
+- ✅ 實作簡單
+- ✅ 適合大多數 Web 應用程式
+
+---
+
+##### 步驟 3️⃣: 建立 Signing Credentials (簽名)
+
+**程式碼**:
+```csharp
+var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha512Signature);
+```
+
+**解析**:
+
+| 參數 | 值 | 說明 |
+|------|-----|------|
+| `key` | `SymmetricSecurityKey` 物件 | 步驟 2 建立的金鑰 |
+| `SecurityAlgorithms.HmacSha512Signature` | 演算法常數 | 指定使用 HMAC-SHA512 |
+
+**SigningCredentials 的作用**:
+
+```
+SigningCredentials 包含兩個資訊:
+1. 金鑰 (Key): 用什麼秘密來簽名?
+2. 演算法 (Algorithm): 用什麼方式簽名?
+
+就像:
+- 金鑰 = 你的印章
+- 演算法 = 蓋章的方式 (直蓋、斜蓋、加印泥?)
+```
+
+**常用的簽章演算法比較**:
+
+| 演算法 | 安全性 | 效能 | Token 大小 | 建議使用 |
+|--------|--------|------|-----------|---------|
+| `HmacSha256` | ⭐⭐⭐ 高 | ⚡⚡⚡ 快 | 📦 小 | ✅ 一般應用 |
+| `HmacSha512` | ⭐⭐⭐⭐ 極高 | ⚡⚡ 中 | 📦📦 大 | ✅ 高安全需求 |
+| `RsaSha256` | ⭐⭐⭐⭐ 極高 | ⚡ 慢 | 📦📦📦 很大 | ⚠️ 微服務架構 |
+
+**本專案使用 HmacSha512 的原因**:
+- 🔒 安全性最高 (512 bits)
+- ⚡ 效能可接受
+- 📦 Token 稍大但可接受
+
+**如果要改用 HmacSha256**:
+```csharp
+// 改用 SHA256 (token 會更小)
+var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256Signature);
+
+// 記得同時修改 key 長度檢查
+if (tokenKey.Length < 32)  // SHA256 需要至少 32 字元
+{
+    throw new Exception("Token key must be at least 32 characters long");
+}
+```
+
+---
+
+##### 步驟 4️⃣: 建立 Token Descriptor (範本)
+
+**程式碼**:
+```csharp
+var tokenDescriptor = new SecurityTokenDescriptor
+{
+    Subject = new ClaimsIdentity(claims),
+    Expires = DateTime.Now.AddDays(7),
+    SigningCredentials = creds
+};
+```
+
+**解析**:
+
+`SecurityTokenDescriptor` 就像是 token 的「設計藍圖」,描述了 token 的所有特性。
+
+| 屬性 | 值 | 說明 |
+|------|-----|------|
+| `Subject` | `ClaimsIdentity` | Token 的主體 (包含所有 Claims) |
+| `Expires` | `DateTime` | Token 過期時間 |
+| `SigningCredentials` | `SigningCredentials` | 簽章方式 |
+
+**完整的 SecurityTokenDescriptor 屬性**:
+
+```csharp
+var tokenDescriptor = new SecurityTokenDescriptor
+{
+    // ✅ 必要屬性
+    Subject = new ClaimsIdentity(claims),              // Token 主體 (Claims)
+    SigningCredentials = creds,                        // 簽章方式
+    
+    // ✅ 建議設定
+    Expires = DateTime.UtcNow.AddDays(7),             // 過期時間 (建議用 UtcNow)
+    NotBefore = DateTime.UtcNow,                       // 生效時間 (現在立即生效)
+    IssuedAt = DateTime.UtcNow,                        // 發行時間
+    
+    // ⚠️ 可選屬性 (進階用途)
+    Issuer = "https://yourdomain.com",                 // 發行者
+    Audience = "https://yourdomain.com",               // 接收者
+    TokenType = "JWT"                                  // Token 類型
+};
+```
+
+**為什麼要設定 Expires?**
+
+```
+沒有過期時間的問題:
+1. Token 被盜後永久有效 💀
+2. 使用者登出後 token 仍可使用
+3. 權限變更無法生效
+
+設定過期時間的好處:
+1. 限制 token 被盜的風險時間
+2. 定期更新 token (可取得最新權限)
+3. 符合安全最佳實踐
+```
+
+**⚠️ DateTime.Now vs DateTime.UtcNow**:
+
+```csharp
+// ❌ 不建議: 使用本地時間
+Expires = DateTime.Now.AddDays(7)
+
+// ✅ 建議: 使用 UTC 時間
+Expires = DateTime.UtcNow.AddDays(7)
+
+原因:
+- 伺服器可能在不同時區
+- UTC 避免時區混淆
+- 分散式系統必須用 UTC
+```
+
+---
+
+##### 步驟 5️⃣: 產生 Token (生成)
+
+**程式碼**:
+```csharp
+var tokenHandler = new JwtSecurityTokenHandler();
+var token = tokenHandler.CreateToken(tokenDescriptor);
+
+return tokenHandler.WriteToken(token);
+```
+
+**解析**:
+
+| 步驟 | 程式碼 | 型別 | 說明 |
+|------|--------|------|------|
+| 1. 建立 Handler | `new JwtSecurityTokenHandler()` | `JwtSecurityTokenHandler` | JWT 的工具類別 |
+| 2. 產生 Token 物件 | `CreateToken(tokenDescriptor)` | `SecurityToken` | 記憶體中的 token 物件 |
+| 3. 序列化成字串 | `WriteToken(token)` | `string` | 可傳輸的 JWT 字串 |
+
+**為什麼分兩步 (CreateToken + WriteToken)?**
+
+```csharp
+// CreateToken 回傳的是物件
+SecurityToken token = tokenHandler.CreateToken(tokenDescriptor);
+Console.WriteLine(token.GetType().Name);
+// 輸出: JwtSecurityToken (一個類別!)
+
+// 物件包含很多屬性
+Console.WriteLine(token.ValidTo);      // 過期時間
+Console.WriteLine(token.Issuer);       // 發行者
+Console.WriteLine(token.Claims);       // Claims 列表
+
+// ❌ 不能直接回傳物件給客戶端
+return token;  // 型別錯誤! 客戶端需要字串
+
+// ✅ 必須序列化成字串
+string tokenString = tokenHandler.WriteToken(token);
+Console.WriteLine(tokenString);
+// 輸出: eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJuYW1laWQ...
+```
+
+**視覺化對比**:
+
+```
+【CreateToken 產生的物件】
+┌─────────────────────────┐
+│   SecurityToken 物件    │
+├─────────────────────────┤
+│ Id: "abc123"            │
+│ ValidFrom: 2025-11-11   │
+│ ValidTo: 2025-11-18     │
+│ Claims: [...]           │
+│ Issuer: "..."           │
+│ Signature: [bytes]      │
+└─────────────────────────┘
+       ↓ WriteToken()
+【序列化成 JWT 字串】
+┌──────────────────────────────────────────┐
+│ eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9...  │
+│ ↑ Header  ↑ Payload  ↑ Signature        │
+└──────────────────────────────────────────┘
+```
+
+
+---
+
+#### 🎯 完整流程記憶法
+
+##### 視覺化五步驟
+
+```
+1️⃣ Claims (資料)
+   ┌─────────────────┐
+   │ Email: test@... │
+   │ ID: 1           │
+   └─────────────────┘
+         ↓
+2️⃣ Security Key (鑰匙)
+   ┌─────────────────────────────────────────┐
+   │ super-secret-key-64-chars-long-...      │
+   └─────────────────────────────────────────┘
+         ↓
+3️⃣ Signing Credentials (簽名方式)
+   ┌─────────────────┐
+   │ Key + HMACSHA512│
+   └─────────────────┘
+         ↓
+4️⃣ Token Descriptor (藍圖)
+   ┌─────────────────────────┐
+   │ Subject: Claims         │
+   │ Expires: 7 days later   │
+   │ Signing: Credentials    │
+   └─────────────────────────┘
+         ↓
+5️⃣ Generate Token (生成)
+   ┌─────────────────────────────────────────┐
+   │ eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9... │
+   └─────────────────────────────────────────┘
+```
+
+##### 記憶與對應程式碼
+
+  | 英文 | 程式碼 | 比喻 |
+|------|--------|------|
+| Claims | `new List<Claim>()` | 填寫身份證資料 |
+| Key | `new SymmetricSecurityKey()` | 拿出印章 |
+| Signing | `new SigningCredentials()` | 決定蓋章方式 |
+| Descriptor | `new SecurityTokenDescriptor` | 按照範本組裝 |
+| Generate | `CreateToken() + WriteToken()` | 印刷成品 |
+
+---
+
+
+
+#### ⚠️ 常見錯誤與排除
+
+##### 錯誤 1: Token key 長度不足
+
+**錯誤訊息**:
+```
+System.Exception: the key size must be greater than: '512' bits, key has '344' bits. (Parameter 'keyBytes')
+```
+
+**原因**: `appsettings.json` 中的 `TokenKey` 太短
+
+**解決方案**:
+```json
+{
+  "TokenKey": "your-super-secret-key-must-be-at-least-64-characters-long-12345"
+}
+```
+
+##### 錯誤 2: Token key 未設定
+
+**錯誤訊息**:
+```
+System.Exception: Token key not found in configuration
+```
+
+**原因**: `appsettings.json` 沒有 `TokenKey` 欄位
+
+**解決方案**:
+```json
+{
+  "ConnectionStrings": {...},
+  "TokenKey": "your-secret-key...",  // 加入這一行
+  "Logging": {...}
+}
+```
+
+##### 錯誤 3: 時區問題導致 token 立即過期
+
+**症狀**: Token 產生後立即無效
+
+**原因**: 使用 `DateTime.Now` 而非 `DateTime.UtcNow`
+
+**解決方案**:
+```csharp
+// ❌ 錯誤
+Expires = DateTime.Now.AddDays(7)
+
+// ✅ 正確
+Expires = DateTime.UtcNow.AddDays(7)
+```
+
+
+---
+
+#### 📚 延伸閱讀與參考資源
+
+- [JWT.io](https://jwt.io/) - JWT 官方網站與除錯工具
+- [RFC 7519 - JSON Web Token](https://tools.ietf.org/html/rfc7519) - JWT 標準規範
+- [System.IdentityModel.Tokens.Jwt 文件](https://www.nuget.org/packages/System.IdentityModel.Tokens.Jwt/) - NuGet 套件資訊
+
+---
+
+#### 📁 相關檔案
+
+- `API/Services/TokenService.cs` - Token 產生服務
+- `API/Interfaces/ITokenService.cs` - Token 服務介面
+- `API/appsettings.json` - TokenKey 設定
+- `API/Controllers/AccountController.cs` - 使用 TokenService 的控制器
+
+**解決狀態**: ✅ 已記錄  
+**相關問題**: 無
 
 ---
 
