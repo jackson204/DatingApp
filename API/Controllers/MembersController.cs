@@ -1,5 +1,6 @@
 using API.Data;
 using API.Entities;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,6 +15,7 @@ public class MembersController(AppDbContext dbContext) : BaseController
         return await dbContext.Users.ToListAsync();
     }
     
+    [Authorize]
     [HttpGet]
     [Route("{id}")]
     public async Task<ActionResult<AppUser>> GetMember(string id)
