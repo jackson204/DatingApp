@@ -1,7 +1,8 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { popResultSelector } from 'rxjs/internal/util/args';
 import { AccountService } from '../../core/services/account-service';
+import { single } from 'rxjs';
 
 @Component({
   selector: 'app-nav',
@@ -11,17 +12,24 @@ import { AccountService } from '../../core/services/account-service';
 })
 export class Nav {
   private accountService = inject(AccountService);
- protected creds:any = { }
+  protected creds: any = {}
 
-  login(){
-   this.accountService.login(this.creds).subscribe({
+  protected loggedIn = signal(false)
+
+  login() {
+    this.accountService.login(this.creds).subscribe({
       next: result => {
-         console.log(result);
+        console.log(result);
+        this.loggedIn.set(true);
+        this.creds = {};
       },
       error: error => {
-       alert(error.message);
+        alert(error.message);
       }
-   })
+    })
   }
 
+  logout() {
+    this.loggedIn.set(false);
+  }
 }
