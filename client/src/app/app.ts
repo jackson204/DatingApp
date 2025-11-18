@@ -1,6 +1,8 @@
 import { HttpClient } from '@angular/common/http';
 import { Component, inject, OnInit, signal } from '@angular/core';
 import { Nav } from "../layout/nav/nav";
+import { AccountService } from '../core/services/account-service';
+import { lastValueFrom } from 'rxjs';
 
 @Component({
   selector: 'app-root',
@@ -9,15 +11,29 @@ import { Nav } from "../layout/nav/nav";
   styleUrl: './app.css'
 })
 export class App implements OnInit {
+  private accountService = inject(AccountService);
   private http = inject(HttpClient);
-  protected  title = 'Dating App';
+  protected title = 'Dating App';
   protected members = signal<any>([]);
 
-  ngOnInit(): void {
-    this.http.get('https://localhost:5001/api/members').subscribe({
-      next: response => this.members.set(response),
-      error: err => console.error(err),
-      complete: () => console.log('Request complete')
-    });
+  async ngOnInit() {
+    this.setCurrentUser();
+    this.members.set(await this.getMembers());
+  }
+
+  setCurrentUser() {
+    const userString = localStorage.getItem('user');
+    if (!userString)  return; 
+    const user = JSON.parse(userString);
+    this.accountService.currentUser.set(user);
+  }
+
+  async getMembers() {
+    try {
+      return lastValueFrom(this.http.get('https://localhost:5001/api/users'));
+    } catch (error) {
+      console.error(error);
+      throw error;
+    }
   }
 }
